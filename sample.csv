@@ -1,3 +1,5 @@
-id,value,qty
-A,10,2
-B,20,3
+patient_id,sex,height_cm,weight_kg,weight_unit
+P001,M,175,80,kg
+P002,F,163,55,kg
+P003,M,180,200,kg
+P004,F,150,130,lbs

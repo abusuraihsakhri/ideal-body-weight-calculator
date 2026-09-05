@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-import math
+import os
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
@@ -127,6 +127,8 @@ def adjusted_body_weight(actual_kg: float, ibw_kg: float) -> float:
 
 def percent_ibw(actual_kg: float, ibw_kg: float) -> float:
     """Calculate actual weight as a percentage of IBW."""
+    if ibw_kg <= 0:
+        raise ValueError(f"IBW must be positive, got {ibw_kg}")
     return (actual_kg / ibw_kg) * 100.0
 
 
@@ -195,8 +197,18 @@ def calculate_patient(
         warnings.append(f"Sex must be 'M' or 'F', got {sex!r}.")
     if height_cm <= 0:
         warnings.append(f"Height {height_cm} must be positive.")
+    elif not (MIN_HEIGHT_CM <= height_cm <= MAX_HEIGHT_CM):
+        warnings.append(
+            f"Height {height_cm} cm is outside plausible range "
+            f"({MIN_HEIGHT_CM}-{MAX_HEIGHT_CM} cm)."
+        )
     if actual_weight_kg <= 0:
         warnings.append(f"Weight {actual_weight_kg} must be positive.")
+    elif not (MIN_WEIGHT_KG <= actual_weight_kg <= MAX_WEIGHT_KG):
+        warnings.append(
+            f"Weight {actual_weight_kg} kg is outside plausible range "
+            f"({MIN_WEIGHT_KG}-{MAX_WEIGHT_KG} kg)."
+        )
 
     height_inches = height_to_inches(height_cm)
 
@@ -209,35 +221,44 @@ def calculate_patient(
     if sex not in ("M", "F") or height_cm <= 0 or actual_weight_kg <= 0:
         return result
 
-    result.ibw_devine = round(ibw_devine(height_inches, sex), 1)
-    result.ibw_robinson = round(ibw_robinson(height_inches, sex), 1)
-    result.ibw_miller = round(ibw_miller(height_inches, sex), 1)
-    result.ibw_hamwi = round(ibw_hamwi(height_inches, sex), 1)
+    # IBW formulas are only valid for heights >= 60 inches (152.4 cm)
+    MIN_FORMULA_HEIGHT_CM = 152.4
+    if height_cm < MIN_FORMULA_HEIGHT_CM:
+        warnings.append(
+            f"Height {height_cm} cm is below the minimum ({MIN_FORMULA_HEIGHT_CM} cm) "
+            f"for which IBW formulas are valid. Results may be unreliable."
+        )
+
+    result.ibw_devine = round(max(0, ibw_devine(height_inches, sex)), 1)
+    result.ibw_robinson = round(max(0, ibw_robinson(height_inches, sex)), 1)
+    result.ibw_miller = round(max(0, ibw_miller(height_inches, sex)), 1)
+    result.ibw_hamwi = round(max(0, ibw_hamwi(height_inches, sex)), 1)
 
     all_ibw = [result.ibw_devine, result.ibw_robinson, result.ibw_miller, result.ibw_hamwi]
     result.ibw_mean = round(sum(all_ibw) / len(all_ibw), 1)
 
     # Use Devine as the primary IBW for adjusted BW and dosing
     primary_ibw = result.ibw_devine
-    result.percent_ibw = round(percent_ibw(actual_weight_kg, primary_ibw), 1)
+    if primary_ibw is not None and primary_ibw > 0:
+        result.percent_ibw = round(percent_ibw(actual_weight_kg, primary_ibw), 1)
 
-    if result.percent_ibw > 130:
-        result.adjusted_bw = round(adjusted_body_weight(actual_weight_kg, primary_ibw), 1)
+        if result.percent_ibw > 130:
+            result.adjusted_bw = round(adjusted_body_weight(actual_weight_kg, primary_ibw), 1)
 
-    # Weight category
-    if result.percent_ibw < 80:
-        result.weight_category = "Underweight"
-    elif result.percent_ibw <= 120:
-        result.weight_category = "Normal"
-    elif result.percent_ibw <= 130:
-        result.weight_category = "Overweight"
-    else:
-        result.weight_category = "Obese"
+        # Weight category
+        if result.percent_ibw < 80:
+            result.weight_category = "Underweight"
+        elif result.percent_ibw <= 120:
+            result.weight_category = "Normal"
+        elif result.percent_ibw <= 130:
+            result.weight_category = "Overweight"
+        else:
+            result.weight_category = "Obese"
 
-    # Dosing recommendation
-    wtype, explanation = dosing_weight_recommendation(actual_weight_kg, primary_ibw)
-    result.dosing_weight_type = wtype
-    result.dosing_recommendation = explanation
+        # Dosing recommendation
+        wtype, explanation = dosing_weight_recommendation(actual_weight_kg, primary_ibw)
+        result.dosing_weight_type = wtype
+        result.dosing_recommendation = explanation
 
     return result
 
@@ -255,10 +276,27 @@ CSV_OUTPUT_FIELDS = [
     "dosing_weight_type", "dosing_recommendation", "warnings",
 ]
 
+# Physiological validation bounds
+MIN_HEIGHT_CM = 30.0    # ~1 ft (neonate)
+MAX_HEIGHT_CM = 272.0   # tallest recorded human
+MIN_WEIGHT_KG = 0.5     # premature infant
+MAX_WEIGHT_KG = 600.0   # extreme obesity upper bound
+
+
+def _validate_path(path: str) -> str:
+    """Validate that a path is safe (no directory traversal escapes)."""
+    normalized = os.path.normpath(path)
+    # Block paths that escape the current directory via ..
+    if ".." in normalized.split(os.sep):
+        raise ValueError(f"Path must not contain directory traversal (..): {path!r}")
+    return normalized
+
 
 def process_csv(input_path: str, output_path: str) -> list[IBWResult]:
     """Read patient rows from CSV, compute IBW for each, write results CSV."""
     results: list[IBWResult] = []
+    input_path = _validate_path(input_path)
+    output_path = _validate_path(output_path)
 
     with open(input_path, "r", newline="", encoding="utf-8-sig") as f_in:
         reader = csv.DictReader(f_in)
@@ -346,6 +384,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     batch.add_argument("--input", required=True, help="Input CSV path")
     batch.add_argument("--output", required=True, help="Output CSV path")
 
+    audit = subparsers.add_parser("audit", help="Run distributed component audit task")
+    audit.add_argument("--task-id", default="AUDIT-TASK-01", help="Task identifier")
+
+    chat = subparsers.add_parser("chat", help="Supervisory conversational assistant")
+    chat.add_argument("query", nargs="*", help="Query string")
+
+    subparsers.add_parser("verify-audit", help="Verify HMAC audit trail integrity")
+
     return parser
 
 
@@ -354,18 +400,18 @@ def _print_single_result(result: IBWResult) -> None:
     print(f"  Height: {result.height_cm:.1f} cm ({result.height_inches:.1f} inches)")
     print(f"  Actual weight: {result.actual_weight_kg:.1f} kg")
     print(f"\n  Ideal Body Weight:")
-    print(f"    Devine:    {result.ibw_devine:.1f} kg")
-    print(f"    Robinson:  {result.ibw_robinson:.1f} kg")
-    print(f"    Miller:    {result.ibw_miller:.1f} kg")
-    print(f"    Hamwi:     {result.ibw_hamwi:.1f} kg")
-    print(f"    Mean:      {result.ibw_mean:.1f} kg")
-    print(f"\n  % IBW: {result.percent_ibw:.1f}%")
-    print(f"  Weight category: {result.weight_category}")
-    if result.adjusted_bw:
+    print(f"    Devine:    {_fmt(result.ibw_devine)} kg")
+    print(f"    Robinson:  {_fmt(result.ibw_robinson)} kg")
+    print(f"    Miller:    {_fmt(result.ibw_miller)} kg")
+    print(f"    Hamwi:     {_fmt(result.ibw_hamwi)} kg")
+    print(f"    Mean:      {_fmt(result.ibw_mean)} kg")
+    print(f"\n  % IBW: {_fmt(result.percent_ibw)}%")
+    print(f"  Weight category: {result.weight_category or 'N/A'}")
+    if result.adjusted_bw is not None:
         print(f"  Adjusted body weight: {result.adjusted_bw:.1f} kg")
     print(f"\n  Dosing recommendation:")
-    print(f"    Use: {result.dosing_weight_type} weight")
-    print(f"    {result.dosing_recommendation}")
+    print(f"    Use: {result.dosing_weight_type or 'N/A'} weight")
+    print(f"    {result.dosing_recommendation or 'N/A'}")
 
     if result.warnings:
         print("\n  Warnings:")
@@ -388,6 +434,34 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == "batch":
         results = process_csv(args.input, args.output)
         print(f"Processed {len(results)} patients -> {args.output}")
+        return 0
+
+    if args.command == "audit":
+        from agents.supervisor import SystemSupervisor
+        from agents.models import SystemTaskPayload
+        supervisor = SystemSupervisor(model_provider="mock")
+        payload = SystemTaskPayload(
+            task_id=args.task_id,
+            target_identifier="CLI-AUDIT",
+            primary_metric=10.0,
+            secondary_metric=3.0,
+        )
+        dossier = supervisor.process_task(payload)
+        print(f"Audit complete: {dossier.dossier_id} urgency={dossier.overall_urgency.value}")
+        return 0
+
+    if args.command == "chat":
+        from agents.supervisor import SystemSupervisor
+        supervisor = SystemSupervisor(model_provider="mock")
+        query = " ".join(args.query) if args.query else "status"
+        response = supervisor.query_supervisory_chat(query)
+        print(response)
+        return 0
+
+    if args.command == "verify-audit":
+        from agents.base import AuditLogger
+        valid = AuditLogger.verify_integrity()
+        print(f"Audit trail integrity: {'VALID' if valid else 'COMPROMISED'}")
         return 0
 
     parser.print_help()

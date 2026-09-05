@@ -9,8 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml .
-RUN pip install --no-cache-dir fastapi uvicorn pydantic pytest
+# Copy only dependency spec first for better layer caching
+COPY requirements*.txt pyproject.toml* ./ 2>/dev/null || true
+
+# Install Python dependencies if requirements.txt exists
+RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
 
 COPY . .
 
@@ -19,4 +22,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["python", "cli.py", "serve", "--host", "0.0.0.0", "--port", "8000"]
+# Default: run the CLI in single-patient mode (override at runtime)
+CMD ["python", "cli.py", "single", "--sex", "M", "--height", "175", "--weight", "70"]

@@ -243,6 +243,84 @@ def test_cli_batch():
 
 
 # ---------------------------------------------------------------------------
+# Path traversal protection
+# ---------------------------------------------------------------------------
+
+def test_path_traversal_blocked():
+    """Paths with .. should be rejected."""
+    try:
+        ibw.process_csv("../etc/passwd", "out.csv")
+        assert False, "expected ValueError for path traversal"
+    except ValueError:
+        pass
+
+
+def test_path_traversal_nested():
+    """Nested traversal paths should be rejected."""
+    try:
+        ibw.process_csv("foo/../../../etc/passwd", "out.csv")
+        assert False, "expected ValueError for nested traversal"
+    except ValueError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Range validation
+# ---------------------------------------------------------------------------
+
+def test_extreme_height_warning():
+    """Very short height should produce a formula-validity warning."""
+    result = ibw.calculate_patient("P1", "M", 50, 80)
+    assert any("below the minimum" in w for w in result.warnings)
+
+
+def test_extreme_weight_warning():
+    """Extreme weight should produce a warning but still compute."""
+    result = ibw.calculate_patient("P1", "M", 175, 700)
+    assert any("outside plausible range" in w for w in result.warnings)
+
+
+def test_invalid_sex_no_crash():
+    """Invalid sex should not crash the printer."""
+    result = ibw.calculate_patient("P1", "X", 175, 80)
+    assert result.ibw_devine is None
+    # Ensure _print_single_result doesn't crash on None values
+    ibw._print_single_result(result)
+
+
+# ---------------------------------------------------------------------------
+# Division by zero protection
+# ---------------------------------------------------------------------------
+
+def test_percent_ibw_zero():
+    """percent_ibw with zero IBW should raise ValueError."""
+    try:
+        ibw.percent_ibw(80, 0)
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# New CLI subcommands
+# ---------------------------------------------------------------------------
+
+def test_cli_audit():
+    rc = ibw.main(["audit", "--task-id", "TEST-01"])
+    assert rc == 0
+
+
+def test_cli_chat():
+    rc = ibw.main(["chat", "Explain", "specifications"])
+    assert rc == 0
+
+
+def test_cli_verify_audit():
+    rc = ibw.main(["verify-audit"])
+    assert rc == 0
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
