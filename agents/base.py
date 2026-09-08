@@ -99,21 +99,29 @@ class AuditTrail:
         return self.logs
 
 
-GLOBAL_AUDIT = AuditTrail()
+_GLOBAL_AUDIT: Optional[AuditTrail] = None
+
+
+def _get_global_audit() -> AuditTrail:
+    """Lazily initialize the global AuditTrail, enforcing env-var presence on first use."""
+    global _GLOBAL_AUDIT
+    if _GLOBAL_AUDIT is None:
+        _GLOBAL_AUDIT = AuditTrail()
+    return _GLOBAL_AUDIT
 
 
 class AuditLogger:
     @staticmethod
     def log(actor: str, actor_tier: str, event_type: str, details: Dict[str, Any]) -> Dict[str, Any]:
-        return GLOBAL_AUDIT.log(actor, actor_tier, event_type, details)
+        return _get_global_audit().log(actor, actor_tier, event_type, details)
 
     @staticmethod
     def get_trail() -> List[Dict[str, Any]]:
-        return GLOBAL_AUDIT.get_trail()
+        return _get_global_audit().get_trail()
 
     @staticmethod
     def verify_integrity() -> bool:
-        return GLOBAL_AUDIT.verify_integrity()
+        return _get_global_audit().verify_integrity()
 
 
 class ActionExecutor:

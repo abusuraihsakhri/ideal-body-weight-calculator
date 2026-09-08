@@ -3,6 +3,7 @@ Automated Pytest Test Suite for Ideal Body Weight Calculator.
 Domain: Clinical & Biomedical AI
 Standard: CAP / CLSI / ISO Standards
 """
+import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -43,6 +44,8 @@ def test_specialized_workers():
 
 
 def test_supervisor_consensus_and_audit():
+    # Set audit secret key for test environment
+    os.environ["AUDIT_SECRET_KEY"] = "test-secret-key-for-pytest-environment-001"
     supervisor = SystemSupervisor(model_provider="mock")
     payload = SystemTaskPayload(
         task_id="TASK-PROD-01",
