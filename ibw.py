@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import sys
 from dataclasses import dataclass, field
@@ -120,15 +121,15 @@ FORMULAS = {
 def adjusted_body_weight(actual_kg: float, ibw_kg: float) -> float:
     """Adjusted body weight = IBW + 0.4 × (actual - IBW).
 
-    Used when actual weight > 130% of IBW for drug dosing.
+    A numerical adjustment used by some medication-specific protocols; not universal.
     """
     return ibw_kg + 0.4 * (actual_kg - ibw_kg)
 
 
 def percent_ibw(actual_kg: float, ibw_kg: float) -> float:
     """Calculate actual weight as a percentage of IBW."""
-    if ibw_kg <= 0:
-        raise ValueError(f"IBW must be positive, got {ibw_kg}")
+    if not math.isfinite(actual_kg) or not math.isfinite(ibw_kg) or ibw_kg <= 0:
+        raise ValueError("Actual weight and IBW must be finite, and IBW positive.")
     return (actual_kg / ibw_kg) * 100.0
 
 
@@ -138,7 +139,7 @@ def percent_ibw(actual_kg: float, ibw_kg: float) -> float:
 
 
 def dosing_weight_recommendation(actual_kg: float, ibw_kg: float) -> tuple[str, str]:
-    """Recommend which weight to use for drug dosing.
+    """Return a legacy illustrative weight-selection heuristic (not a dosing rule).
 
     Returns (recommended_weight_type, explanation).
     """
@@ -190,19 +191,23 @@ def calculate_patient(
     actual_weight_kg: float,
 ) -> IBWResult:
     """Calculate all IBW formulas, adjusted BW, and dosing recommendations."""
-    sex = sex.upper()
+    sex = str(sex).strip().upper()
     warnings: list[str] = []
 
     if sex not in ("M", "F"):
         warnings.append(f"Sex must be 'M' or 'F', got {sex!r}.")
-    if height_cm <= 0:
+    if not math.isfinite(height_cm):
+        warnings.append("Height must be finite.")
+    elif height_cm <= 0:
         warnings.append(f"Height {height_cm} must be positive.")
     elif not (MIN_HEIGHT_CM <= height_cm <= MAX_HEIGHT_CM):
         warnings.append(
             f"Height {height_cm} cm is outside plausible range "
             f"({MIN_HEIGHT_CM}-{MAX_HEIGHT_CM} cm)."
         )
-    if actual_weight_kg <= 0:
+    if not math.isfinite(actual_weight_kg):
+        warnings.append("Weight must be finite.")
+    elif actual_weight_kg <= 0:
         warnings.append(f"Weight {actual_weight_kg} must be positive.")
     elif not (MIN_WEIGHT_KG <= actual_weight_kg <= MAX_WEIGHT_KG):
         warnings.append(
@@ -210,7 +215,7 @@ def calculate_patient(
             f"({MIN_WEIGHT_KG}-{MAX_WEIGHT_KG} kg)."
         )
 
-    height_inches = height_to_inches(height_cm)
+    height_inches = height_to_inches(height_cm) if math.isfinite(height_cm) else 0.0
 
     result = IBWResult(
         patient_id=patient_id, sex=sex, height_cm=height_cm,
@@ -218,7 +223,8 @@ def calculate_patient(
         actual_weight_kg=actual_weight_kg, warnings=warnings,
     )
 
-    if sex not in ("M", "F") or height_cm <= 0 or actual_weight_kg <= 0:
+    if (sex not in ("M", "F") or not math.isfinite(height_cm) or
+            not math.isfinite(actual_weight_kg) or height_cm <= 0 or actual_weight_kg <= 0):
         return result
 
     # IBW formulas are only valid for heights >= 60 inches (152.4 cm)
@@ -226,8 +232,9 @@ def calculate_patient(
     if height_cm < MIN_FORMULA_HEIGHT_CM:
         warnings.append(
             f"Height {height_cm} cm is below the minimum ({MIN_FORMULA_HEIGHT_CM} cm) "
-            f"for which IBW formulas are valid. Results may be unreliable."
+            f"for which IBW formulas are valid. No estimate is returned."
         )
+        return result
 
     result.ibw_devine = round(max(0, ibw_devine(height_inches, sex)), 1)
     result.ibw_robinson = round(max(0, ibw_robinson(height_inches, sex)), 1)
@@ -322,8 +329,15 @@ def process_csv(input_path: str, output_path: str) -> list[IBWResult]:
 
             if weight_unit in ("lb", "lbs", "pound", "pounds"):
                 weight_kg = weight_to_kg(weight_raw)
-            else:
+            elif weight_unit == "kg":
                 weight_kg = weight_raw
+            else:
+                results.append(IBWResult(
+                    patient_id=patient_id, sex=sex, height_cm=height_cm,
+                    height_inches=0.0, actual_weight_kg=0.0,
+                    warnings=[f"Unsupported weight unit: {weight_unit!r}"],
+                ))
+                continue
 
             result = calculate_patient(
                 patient_id=patient_id, sex=sex,
@@ -429,7 +443,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             height_cm=args.height, actual_weight_kg=args.weight,
         )
         _print_single_result(result)
-        return 0
+        return 0 if result.ibw_devine is not None else 2
 
     if args.command == "batch":
         results = process_csv(args.input, args.output)
@@ -462,7 +476,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         from agents.base import AuditLogger
         valid = AuditLogger.verify_integrity()
         print(f"Audit trail integrity: {'VALID' if valid else 'COMPROMISED'}")
-        return 0
+        return 0 if valid else 1
 
     parser.print_help()
     return 1
