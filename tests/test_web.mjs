@@ -50,7 +50,7 @@ test("batch input validates per row and exports safely", () => {
   assert.match(rows[2].error, /below 152.4/);
   assert.match(rows[3].error, /Unsupported weight unit/);
   const output = resultsToCsv(rows);
-  assert.match(output, /"'=1\\+2/);
+  assert.match(output, /'=1\+2/);
   assert.match(output, /wrong-unit/);
   assert.deepEqual(parseCsv(output)[0][0], "patient_id");
 });
