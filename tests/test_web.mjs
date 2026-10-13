@@ -15,6 +15,9 @@ test("adjusted body weight is conditional, never a dosing instruction", () => {
   const elevated = calculatePatient({ sex: "M", height_cm: inchesToCm(70), weight_kg: 110 });
   assert.equal(elevated.adjusted_bw, 87.8);
   assert.equal(elevated.percent_ibw, 150.7);
+  const boundary = calculatePatient({ sex: "M", height_cm: inchesToCm(70), weight_kg: 73 * 1.3003 });
+  assert.equal(boundary.percent_ibw, 130.0);
+  assert.notEqual(boundary.adjusted_bw, null);
 });
 
 test("pounds conversion, height boundaries, finite inputs and sex validation", () => {
