@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import sys
 from dataclasses import dataclass, field
@@ -36,7 +37,7 @@ def height_to_inches(height_cm: float) -> float:
 
 def weight_to_kg(weight_lbs: float) -> float:
     """Convert weight from pounds to kg."""
-    return weight_lbs / 2.205
+    return weight_lbs * 0.45359237
 
 
 # ---------------------------------------------------------------------------
@@ -120,15 +121,15 @@ FORMULAS = {
 def adjusted_body_weight(actual_kg: float, ibw_kg: float) -> float:
     """Adjusted body weight = IBW + 0.4 × (actual - IBW).
 
-    Used when actual weight > 130% of IBW for drug dosing.
+    A numerical adjustment used by some medication-specific protocols; not universal.
     """
     return ibw_kg + 0.4 * (actual_kg - ibw_kg)
 
 
 def percent_ibw(actual_kg: float, ibw_kg: float) -> float:
     """Calculate actual weight as a percentage of IBW."""
-    if ibw_kg <= 0:
-        raise ValueError(f"IBW must be positive, got {ibw_kg}")
+    if not math.isfinite(actual_kg) or not math.isfinite(ibw_kg) or ibw_kg <= 0:
+        raise ValueError("Actual weight and IBW must be finite, and IBW positive.")
     return (actual_kg / ibw_kg) * 100.0
 
 
@@ -138,23 +139,23 @@ def percent_ibw(actual_kg: float, ibw_kg: float) -> float:
 
 
 def dosing_weight_recommendation(actual_kg: float, ibw_kg: float) -> tuple[str, str]:
-    """Recommend which weight to use for drug dosing.
+    """Return a legacy illustrative weight-selection heuristic (not a dosing rule).
 
     Returns (recommended_weight_type, explanation).
     """
     pct = percent_ibw(actual_kg, ibw_kg)
 
     if pct < 80:
-        return "actual", "Underweight (<80% IBW): use actual body weight"
+        return "actual", "Illustrative <80% IBW weight tier; consult the drug-specific protocol."
     elif pct <= 120:
-        return "actual", "Normal range (80-120% IBW): use actual body weight"
+        return "actual", "Illustrative 80-120% IBW weight tier; consult the drug-specific protocol."
     elif pct <= 130:
-        return "ibw", "Mildly overweight (120-130% IBW): use IBW to avoid overdosing"
+        return "ibw", "Illustrative 120-130% IBW weight tier; consult the drug-specific protocol."
     else:
         ajbw = adjusted_body_weight(actual_kg, ibw_kg)
         return "adjusted", (
-            f"Obese (>130% IBW): use adjusted body weight ({ajbw:.1f} kg) "
-            f"= IBW + 0.4 × (actual - IBW)"
+            f"Illustrative >130% IBW adjusted-weight tier ({ajbw:.1f} kg) "
+            f"= IBW + 0.4 × (actual - IBW); not a dosing directive."
         )
 
 
@@ -190,19 +191,23 @@ def calculate_patient(
     actual_weight_kg: float,
 ) -> IBWResult:
     """Calculate all IBW formulas, adjusted BW, and dosing recommendations."""
-    sex = sex.upper()
+    sex = str(sex).strip().upper()
     warnings: list[str] = []
 
     if sex not in ("M", "F"):
         warnings.append(f"Sex must be 'M' or 'F', got {sex!r}.")
-    if height_cm <= 0:
+    if not math.isfinite(height_cm):
+        warnings.append("Height must be finite.")
+    elif height_cm <= 0:
         warnings.append(f"Height {height_cm} must be positive.")
     elif not (MIN_HEIGHT_CM <= height_cm <= MAX_HEIGHT_CM):
         warnings.append(
             f"Height {height_cm} cm is outside plausible range "
             f"({MIN_HEIGHT_CM}-{MAX_HEIGHT_CM} cm)."
         )
-    if actual_weight_kg <= 0:
+    if not math.isfinite(actual_weight_kg):
+        warnings.append("Weight must be finite.")
+    elif actual_weight_kg <= 0:
         warnings.append(f"Weight {actual_weight_kg} must be positive.")
     elif not (MIN_WEIGHT_KG <= actual_weight_kg <= MAX_WEIGHT_KG):
         warnings.append(
@@ -210,7 +215,7 @@ def calculate_patient(
             f"({MIN_WEIGHT_KG}-{MAX_WEIGHT_KG} kg)."
         )
 
-    height_inches = height_to_inches(height_cm)
+    height_inches = height_to_inches(height_cm) if math.isfinite(height_cm) else 0.0
 
     result = IBWResult(
         patient_id=patient_id, sex=sex, height_cm=height_cm,
@@ -218,7 +223,10 @@ def calculate_patient(
         actual_weight_kg=actual_weight_kg, warnings=warnings,
     )
 
-    if sex not in ("M", "F") or height_cm <= 0 or actual_weight_kg <= 0:
+    if (sex not in ("M", "F") or not math.isfinite(height_cm) or
+            not math.isfinite(actual_weight_kg) or
+            not (MIN_HEIGHT_CM <= height_cm <= MAX_HEIGHT_CM) or
+            not (MIN_WEIGHT_KG <= actual_weight_kg <= MAX_WEIGHT_KG)):
         return result
 
     # IBW formulas are only valid for heights >= 60 inches (152.4 cm)
@@ -226,8 +234,9 @@ def calculate_patient(
     if height_cm < MIN_FORMULA_HEIGHT_CM:
         warnings.append(
             f"Height {height_cm} cm is below the minimum ({MIN_FORMULA_HEIGHT_CM} cm) "
-            f"for which IBW formulas are valid. Results may be unreliable."
+            f"for which IBW formulas are valid. No estimate is returned."
         )
+        return result
 
     result.ibw_devine = round(max(0, ibw_devine(height_inches, sex)), 1)
     result.ibw_robinson = round(max(0, ibw_robinson(height_inches, sex)), 1)
@@ -240,17 +249,18 @@ def calculate_patient(
     # Use Devine as the primary IBW for adjusted BW and dosing
     primary_ibw = result.ibw_devine
     if primary_ibw is not None and primary_ibw > 0:
-        result.percent_ibw = round(percent_ibw(actual_weight_kg, primary_ibw), 1)
+        raw_percent_ibw = percent_ibw(actual_weight_kg, primary_ibw)
+        result.percent_ibw = round(raw_percent_ibw, 1)
 
-        if result.percent_ibw > 130:
+        if raw_percent_ibw > 130:
             result.adjusted_bw = round(adjusted_body_weight(actual_weight_kg, primary_ibw), 1)
 
-        # Weight category
-        if result.percent_ibw < 80:
+        # Weight tier (not a diagnostic weight category)
+        if raw_percent_ibw < 80:
             result.weight_category = "Underweight"
-        elif result.percent_ibw <= 120:
+        elif raw_percent_ibw <= 120:
             result.weight_category = "Normal"
-        elif result.percent_ibw <= 130:
+        elif raw_percent_ibw <= 130:
             result.weight_category = "Overweight"
         else:
             result.weight_category = "Obese"
@@ -322,8 +332,15 @@ def process_csv(input_path: str, output_path: str) -> list[IBWResult]:
 
             if weight_unit in ("lb", "lbs", "pound", "pounds"):
                 weight_kg = weight_to_kg(weight_raw)
-            else:
+            elif weight_unit == "kg":
                 weight_kg = weight_raw
+            else:
+                results.append(IBWResult(
+                    patient_id=patient_id, sex=sex, height_cm=height_cm,
+                    height_inches=0.0, actual_weight_kg=0.0,
+                    warnings=[f"Unsupported weight unit: {weight_unit!r}"],
+                ))
+                continue
 
             result = calculate_patient(
                 patient_id=patient_id, sex=sex,
@@ -337,7 +354,7 @@ def process_csv(input_path: str, output_path: str) -> list[IBWResult]:
         writer.writeheader()
         for r in results:
             writer.writerow({
-                "patient_id": r.patient_id,
+                "patient_id": _csv_safe(r.patient_id),
                 "sex": r.sex,
                 "height_cm": r.height_cm,
                 "height_inches": r.height_inches,
@@ -351,11 +368,16 @@ def process_csv(input_path: str, output_path: str) -> list[IBWResult]:
                 "percent_ibw": _fmt(r.percent_ibw),
                 "weight_category": r.weight_category or "",
                 "dosing_weight_type": r.dosing_weight_type or "",
-                "dosing_recommendation": r.dosing_recommendation or "",
-                "warnings": " | ".join(r.warnings),
+                "dosing_recommendation": _csv_safe(r.dosing_recommendation or ""),
+                "warnings": _csv_safe(" | ".join(r.warnings)),
             })
 
     return results
+
+
+def _csv_safe(value: str) -> str:
+    """Prefix spreadsheet formula-like text from untrusted CSV inputs."""
+    return "'" + value if value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")) else value
 
 
 def _fmt(value: Optional[float]) -> str:
@@ -409,8 +431,8 @@ def _print_single_result(result: IBWResult) -> None:
     print(f"  Weight category: {result.weight_category or 'N/A'}")
     if result.adjusted_bw is not None:
         print(f"  Adjusted body weight: {result.adjusted_bw:.1f} kg")
-    print(f"\n  Dosing recommendation:")
-    print(f"    Use: {result.dosing_weight_type or 'N/A'} weight")
+    print(f"\n  Legacy weight-selection heuristic (not a dosing directive):")
+    print(f"    Weight tier: {result.dosing_weight_type or 'N/A'}")
     print(f"    {result.dosing_recommendation or 'N/A'}")
 
     if result.warnings:
@@ -429,7 +451,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             height_cm=args.height, actual_weight_kg=args.weight,
         )
         _print_single_result(result)
-        return 0
+        return 0 if result.ibw_devine is not None else 2
 
     if args.command == "batch":
         results = process_csv(args.input, args.output)
@@ -462,7 +484,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         from agents.base import AuditLogger
         valid = AuditLogger.verify_integrity()
         print(f"Audit trail integrity: {'VALID' if valid else 'COMPROMISED'}")
-        return 0
+        return 0 if valid else 1
 
     parser.print_help()
     return 1

@@ -2,12 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Ideal Body Weight Calculator API",
-    "description": "Enterprise Distributed Component Platform (Clinical & Cryptographic AI) adhering to CAP / CLSI / NIST Standards.",
-    "version": "3.0.0-ENTERPRISE",
-    "contact": {
-      "name": "Dr. Abu Suraih Sakhri",
-      "url": "https://github.com/abusuraihsakhri"
-    }
+    "version": "3.0.0",
+    "description": "Adult IBW calculations with optional experimental audit endpoints."
   },
   "paths": {
     "/health": {
@@ -15,14 +11,14 @@
         "summary": "Health and metadata check",
         "responses": {
           "200": {
-            "description": "System optimal"
+            "description": "HTTP server healthy"
           }
         }
       }
     },
     "/metrics": {
       "get": {
-        "summary": "Prometheus operational metrics",
+        "summary": "Operational metrics (JSON)",
         "responses": {
           "200": {
             "description": "Prometheus text metrics"
@@ -107,6 +103,52 @@
         "responses": {
           "200": {
             "description": "Cryptographic audit trail"
+          }
+        }
+      }
+    },
+    "/api/ibw": {
+      "post": {
+        "summary": "Calculate four adult IBW estimates",
+        "description": "Returns Devine, Robinson, Miller, Hamwi, mean, percentage of Devine and conditional adjusted weight. Valid for adult height at or above 152.4 cm.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sex": {
+                    "type": "string",
+                    "enum": [
+                      "M",
+                      "F",
+                      "m",
+                      "f"
+                    ]
+                  },
+                  "height_cm": {
+                    "type": "number"
+                  },
+                  "weight_kg": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "sex",
+                  "height_cm",
+                  "weight_kg"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "IBW result"
+          },
+          "422": {
+            "description": "Unsupported or invalid inputs"
           }
         }
       }
