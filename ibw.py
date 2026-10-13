@@ -351,7 +351,7 @@ def process_csv(input_path: str, output_path: str) -> list[IBWResult]:
         writer.writeheader()
         for r in results:
             writer.writerow({
-                "patient_id": r.patient_id,
+                "patient_id": _csv_safe(r.patient_id),
                 "sex": r.sex,
                 "height_cm": r.height_cm,
                 "height_inches": r.height_inches,
@@ -365,11 +365,16 @@ def process_csv(input_path: str, output_path: str) -> list[IBWResult]:
                 "percent_ibw": _fmt(r.percent_ibw),
                 "weight_category": r.weight_category or "",
                 "dosing_weight_type": r.dosing_weight_type or "",
-                "dosing_recommendation": r.dosing_recommendation or "",
-                "warnings": " | ".join(r.warnings),
+                "dosing_recommendation": _csv_safe(r.dosing_recommendation or ""),
+                "warnings": _csv_safe(" | ".join(r.warnings)),
             })
 
     return results
+
+
+def _csv_safe(value: str) -> str:
+    """Prefix spreadsheet formula-like text from untrusted CSV inputs."""
+    return "'" + value if value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")) else value
 
 
 def _fmt(value: Optional[float]) -> str:
