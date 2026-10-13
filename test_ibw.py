@@ -6,6 +6,7 @@ Run with: python test_ibw.py
 import csv
 import math
 import os
+import secrets
 import tempfile
 
 import ibw
@@ -306,6 +307,7 @@ def test_percent_ibw_zero():
 # ---------------------------------------------------------------------------
 
 def test_cli_audit():
+    os.environ.setdefault("AUDIT_SECRET_KEY", secrets.token_hex(32))
     rc = ibw.main(["audit", "--task-id", "TEST-01"])
     assert rc == 0
 
@@ -316,6 +318,7 @@ def test_cli_chat():
 
 
 def test_cli_verify_audit():
+    os.environ.setdefault("AUDIT_SECRET_KEY", secrets.token_hex(32))
     rc = ibw.main(["verify-audit"])
     assert rc == 0
 
