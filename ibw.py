@@ -37,7 +37,7 @@ def height_to_inches(height_cm: float) -> float:
 
 def weight_to_kg(weight_lbs: float) -> float:
     """Convert weight from pounds to kg."""
-    return weight_lbs / 2.205
+    return weight_lbs * 0.45359237
 
 
 # ---------------------------------------------------------------------------
@@ -247,17 +247,18 @@ def calculate_patient(
     # Use Devine as the primary IBW for adjusted BW and dosing
     primary_ibw = result.ibw_devine
     if primary_ibw is not None and primary_ibw > 0:
-        result.percent_ibw = round(percent_ibw(actual_weight_kg, primary_ibw), 1)
+        raw_percent_ibw = percent_ibw(actual_weight_kg, primary_ibw)
+        result.percent_ibw = round(raw_percent_ibw, 1)
 
-        if result.percent_ibw > 130:
+        if raw_percent_ibw > 130:
             result.adjusted_bw = round(adjusted_body_weight(actual_weight_kg, primary_ibw), 1)
 
-        # Weight category
-        if result.percent_ibw < 80:
+        # Weight tier (not a diagnostic weight category)
+        if raw_percent_ibw < 80:
             result.weight_category = "Underweight"
-        elif result.percent_ibw <= 120:
+        elif raw_percent_ibw <= 120:
             result.weight_category = "Normal"
-        elif result.percent_ibw <= 130:
+        elif raw_percent_ibw <= 130:
             result.weight_category = "Overweight"
         else:
             result.weight_category = "Obese"
