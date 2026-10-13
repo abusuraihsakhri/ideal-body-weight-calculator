@@ -39,7 +39,7 @@ test("CSV parser supports BOM, line breaks and quoted text", () => {
 test("batch input validates per row and exports safely", () => {
   const csv = "patient_id,sex,height_cm,weight_kg,weight_unit\n" +
     "case01,M,177.8,80,kg\n" +
-    "=HYPERLINK(\"http://unsafe\"),F,163,130,lb\n" +
+    "=1+2,F,163,130,lb\n" +
     "bad,M,150,70,kg\n" +
     "wrong-unit,F,163,55,stone\n";
   const rows = processCsvText(csv);
@@ -50,7 +50,7 @@ test("batch input validates per row and exports safely", () => {
   assert.match(rows[2].error, /below 152.4/);
   assert.match(rows[3].error, /Unsupported weight unit/);
   const output = resultsToCsv(rows);
-  assert.match(output, /"'=HYPERLINK/);
+  assert.match(output, /"'=1\\+2/);
   assert.match(output, /wrong-unit/);
   assert.deepEqual(parseCsv(output)[0][0], "patient_id");
 });
