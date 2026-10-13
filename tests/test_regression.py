@@ -62,3 +62,14 @@ def test_audit_detects_modified_signed_fields_and_chain_links():
 
 def test_invalid_cli_single_exits_nonzero():
     assert ibw.main(["single", "--sex", "M", "--height", "150", "--weight", "80"]) == 2
+
+
+def test_csv_spreadsheet_formula_is_escaped():
+    with tempfile.TemporaryDirectory() as folder:
+        source = Path(folder) / "input.csv"
+        destination = Path(folder) / "output.csv"
+        source.write_text("patient_id,sex,height_cm,weight_kg\n=1+2,M,175,80\n")
+        ibw.process_csv(str(source), str(destination))
+        with destination.open(newline="") as file:
+            exported = list(csv.DictReader(file))
+        assert exported[0]["patient_id"] == "'=1+2"
