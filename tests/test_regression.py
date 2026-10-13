@@ -86,3 +86,10 @@ def test_supervisor_blocks_detectable_phi_in_attributes():
     )
     with pytest.raises(SecurityException):
         SystemSupervisor(model_provider="mock").process_task(payload)
+
+
+def test_adjusted_weight_threshold_uses_unrounded_percentage():
+    result = ibw.calculate_patient("anon", "M", 177.8, 73 * 1.3003)
+    assert result.percent_ibw == 130.0  # Display precision.
+    assert result.adjusted_bw is not None  # Exact percentage > 130%.
+    assert result.dosing_weight_type == "adjusted"
