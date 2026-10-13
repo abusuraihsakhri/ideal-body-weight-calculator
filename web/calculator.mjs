@@ -37,9 +37,7 @@ export function calculatePatient({ sex, height_cm, weight_kg }) {
       return [name.toLowerCase(), round1(intercept + perInch * (heightInches - 60))];
     })
   );
-  const devineUnrounded = COEFFICIENTS.Devine[normalizedSex][0] +
-    2.3 * (heightInches - 60);
-  const percent = (weight / devineUnrounded) * 100;
+  const percent = (weight / results.devine) * 100;
   return {
     sex: normalizedSex,
     height_cm: height,
@@ -48,7 +46,7 @@ export function calculatePatient({ sex, height_cm, weight_kg }) {
     ...results,
     mean: round1(Object.values(results).reduce((a, b) => a + b, 0) / 4),
     percent_ibw: round1(percent),
-    adjusted_bw: percent > 130 ? round1(devineUnrounded + 0.4 * (weight - devineUnrounded)) : null,
+    adjusted_bw: percent > 130 ? round1(results.devine + 0.4 * (weight - results.devine)) : null,
   };
 }
 
