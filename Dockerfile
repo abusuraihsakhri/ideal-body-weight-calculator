@@ -10,10 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy only dependency spec first for better layer caching
-COPY requirements*.txt pyproject.toml* ./ 2>/dev/null || true
-
-# Install Python dependencies if requirements.txt exists
-RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
@@ -22,5 +20,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default: run the CLI in single-patient mode (override at runtime)
-CMD ["python", "cli.py", "single", "--sex", "M", "--height", "175", "--weight", "70"]
+# Serve the calculator interface and API on the exposed port.
+CMD ["uvicorn", "agents.api:app", "--host", "0.0.0.0", "--port", "8000"]
