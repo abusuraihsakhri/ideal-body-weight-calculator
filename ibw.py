@@ -224,7 +224,9 @@ def calculate_patient(
     )
 
     if (sex not in ("M", "F") or not math.isfinite(height_cm) or
-            not math.isfinite(actual_weight_kg) or height_cm <= 0 or actual_weight_kg <= 0):
+            not math.isfinite(actual_weight_kg) or
+            not (MIN_HEIGHT_CM <= height_cm <= MAX_HEIGHT_CM) or
+            not (MIN_WEIGHT_KG <= actual_weight_kg <= MAX_WEIGHT_KG)):
         return result
 
     # IBW formulas are only valid for heights >= 60 inches (152.4 cm)
