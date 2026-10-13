@@ -146,16 +146,16 @@ def dosing_weight_recommendation(actual_kg: float, ibw_kg: float) -> tuple[str, 
     pct = percent_ibw(actual_kg, ibw_kg)
 
     if pct < 80:
-        return "actual", "Underweight (<80% IBW): use actual body weight"
+        return "actual", "Illustrative <80% IBW weight tier; consult the drug-specific protocol."
     elif pct <= 120:
-        return "actual", "Normal range (80-120% IBW): use actual body weight"
+        return "actual", "Illustrative 80-120% IBW weight tier; consult the drug-specific protocol."
     elif pct <= 130:
-        return "ibw", "Mildly overweight (120-130% IBW): use IBW to avoid overdosing"
+        return "ibw", "Illustrative 120-130% IBW weight tier; consult the drug-specific protocol."
     else:
         ajbw = adjusted_body_weight(actual_kg, ibw_kg)
         return "adjusted", (
-            f"Obese (>130% IBW): use adjusted body weight ({ajbw:.1f} kg) "
-            f"= IBW + 0.4 × (actual - IBW)"
+            f"Illustrative >130% IBW adjusted-weight tier ({ajbw:.1f} kg) "
+            f"= IBW + 0.4 × (actual - IBW); not a dosing directive."
         )
 
 
@@ -428,8 +428,8 @@ def _print_single_result(result: IBWResult) -> None:
     print(f"  Weight category: {result.weight_category or 'N/A'}")
     if result.adjusted_bw is not None:
         print(f"  Adjusted body weight: {result.adjusted_bw:.1f} kg")
-    print(f"\n  Dosing recommendation:")
-    print(f"    Use: {result.dosing_weight_type or 'N/A'} weight")
+    print(f"\n  Legacy weight-selection heuristic (not a dosing directive):")
+    print(f"    Weight tier: {result.dosing_weight_type or 'N/A'}")
     print(f"    {result.dosing_recommendation or 'N/A'}")
 
     if result.warnings:
