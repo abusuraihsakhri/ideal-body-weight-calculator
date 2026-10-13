@@ -73,3 +73,16 @@ def test_csv_spreadsheet_formula_is_escaped():
         with destination.open(newline="") as file:
             exported = list(csv.DictReader(file))
         assert exported[0]["patient_id"] == "'=1+2"
+
+
+def test_supervisor_blocks_detectable_phi_in_attributes():
+    from agents.base import SecurityException
+    from agents.models import SystemTaskPayload
+    from agents.supervisor import SystemSupervisor
+
+    payload = SystemTaskPayload(
+        task_id="anon", target_identifier="demo", primary_metric=1.0,
+        attributes={"contact": "patient@example.com"},
+    )
+    with pytest.raises(SecurityException):
+        SystemSupervisor(model_provider="mock").process_task(payload)
