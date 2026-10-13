@@ -1,40 +1,101 @@
-name: Ideal Body Weight Calculator CI/CD & Security Verification
+name: IBW calculator verification and Pages
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master]
   pull_request:
-    branches: [ master, main ]
+    branches: [master]
+
+permissions:
+  contents: read
 
 jobs:
-  test-and-audit:
+  tests:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
-
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Configure isolated audit key
+        run: echo "AUDIT_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> "$GITHUB_ENV"
+      - name: Python tests and compilation
+        run: |
+          python -m compileall -q ibw.py cli.py agents tests
+          python -m pytest -q
+          python test_ibw.py
+          python -m pip check
+      - name: Browser JavaScript tests
+        run: |
+          node --check web/app.mjs
+          node --check web/calculator.mjs
+          node --test tests/test_web.mjs
+      - name: API and static-site HTTP smoke test
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m uvicorn agents.api:app --host 127.0.0.1 --port 8000 > /tmp/ibw-api.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" || true' EXIT
+          for attempt in $(seq 1 25); do
+            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent --show-error http://127.0.0.1:8000/ | grep -q "Ideal Body Weight Calculator"
+          curl --fail --silent --show-error http://127.0.0.1:8000/calculator.mjs | grep -q "calculatePatient"
+          curl --fail --silent --show-error --header "Content-Type: application/json" \
+            --data '{"sex":"M","height_cm":177.8,"weight_kg":80}' \
+            http://127.0.0.1:8000/api/ibw > /tmp/ibw-api-result.json
+          python -c 'import json; assert json.load(open("/tmp/ibw-api-result.json"))["ibw_devine"] == 73.0'
+          curl --silent --output /dev/null --write-out "%{http_code}" --header "Content-Type: application/json" \
+            --data '{"sex":"M","height_cm":150,"weight_kg":80}' \
+            http://127.0.0.1:8000/api/ibw | grep -qx 422
+      - name: Dependency vulnerability audit
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build Docker image
+        run: docker build -t ibw-calculator-test .
+      - name: Verify Docker service
+        run: |
+          docker run -d --name ibw-test -p 8000:8000 -e AUDIT_SECRET_KEY=test-only-key ibw-calculator-test
+          trap 'docker rm -f ibw-test || true' EXIT
+          for attempt in $(seq 1 25); do
+            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          docker logs ibw-test
+          exit 1
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install fastapi uvicorn pydantic pytest
-
-    - name: Run Pytest Suite
-      run: |
-        pytest -v
-
-    - name: Security SAST & Zero-PHI Audit
-      run: |
-        python -c "
-        from agents.base import PHIGuard, AuditLogger
-        import pytest
-        assert AuditLogger.verify_integrity() is True
-        print('Security & Zero-PHI Audit Passed!')
-        "
+  deploy-pages:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [tests, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - name: Deploy static calculator
+        id: deployment
+        uses: actions/deploy-pages@v4
